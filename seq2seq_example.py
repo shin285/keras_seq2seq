@@ -103,6 +103,7 @@ target_token_index = dict(
 encoder_input_data = np.zeros(
     (len(input_texts), max_encoder_seq_length, num_encoder_tokens),
     dtype='float32')
+
 decoder_input_data = np.zeros(
     (len(input_texts), max_decoder_seq_length, num_decoder_tokens),
     dtype='float32')
@@ -120,6 +121,10 @@ for i, (input_text, target_text) in enumerate(zip(input_texts, target_texts)):
             # decoder_target_data will be ahead by one timestep
             # and will not include the start character.
             decoder_target_data[i, t - 1, target_token_index[char]] = 1.
+
+print(encoder_input_data)
+print(decoder_input_data)
+print(decoder_target_data)
 
 # Define an input sequence and process it.
 encoder_inputs = Input(shape=(None, num_encoder_tokens))
@@ -143,9 +148,6 @@ decoder_outputs = decoder_dense(decoder_outputs)
 # `encoder_input_data` & `decoder_input_data` into `decoder_target_data`
 model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
 
-print(encoder_input_data)
-print(decoder_input_data)
-print(decoder_target_data)
 
 # Run training
 model.compile(optimizer='rmsprop', loss='categorical_crossentropy')

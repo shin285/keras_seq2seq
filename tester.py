@@ -10,11 +10,20 @@ dataloader_test("sequence_data.test")
 
 seq2seq = Seq2Seq()
 seq2seq.training(filename="sequence_data.test")
+# seq2seq.training(filename="sj2003.convert1.tag")
 model = seq2seq.get_model()
 
-model.summary()
-encoder_layer = model.get_layer("encoder")
+while True:
+    text = input("input : ")  # Python 3
+    if text == "END":
+        break
+    predict_seq = seq2seq.predict(input_sentence=text)
+    print(predict_seq)
 
-from keras.utils import plot_model
+print(seq2seq.predict("Hi this is JunsooShin"))
 
-plot_model(model, to_file='model.png', show_shapes=True)
+# model.summary()
+#
+# from keras.utils import plot_model
+#
+# plot_model(model, to_file='model.png', show_shapes=True)
