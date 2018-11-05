@@ -13,62 +13,55 @@ class Seq2Seq:
     def __init__(self):
         pass
 
+    def _get_generator(self, encoder_input_data, decoder_input_data, decoder_output_data, batch_size=32):
+        data_triplet = zip(encoder_input_data, decoder_input_data, decoder_output_data)
+        while True:
+            for encoder_input, decoder_input, decoder_output in data_triplet:
+                encoder_input_list = []
+                decoder_input_list = []
+                decoder_output_list = []
+                for i in range(batch_size):
+                    encoder_input_list.append(encoder_input)
+                    decoder_input_list.append(decoder_input)
+                    decoder_output_list.append(decoder_output)
+                yield [np.array(encoder_input_list), np.array(decoder_input_list)], np.array(decoder_output_list)
+
     def predict(self, input_sentence):
-        _encoder_inputs = self._model.get_layer(name="encoder_inputs").input
-        _, encoder_state_h, encoder_state_c = self._model.get_layer(name="encoder").output
-        encoder_states = [encoder_state_h, encoder_state_c]
-        _encoder_model = Model(_encoder_inputs, encoder_states)
-
-        # decoder state for each step
-        _decoder_state_input_h = Input(shape=(128,), name="decoder_state_input_h")
-        _decoder_state_input_c = Input(shape=(128,), name="decoder_state_input_c")
-        decoder_states_inputs = [_decoder_state_input_h, _decoder_state_input_c]
-
-        _decoder = self._model.get_layer(name="decoder")
-        _decoder_inputs = self._model.get_layer(name="decoder_inputs").input
-        _decoder_dense = self._model.get_layer(name="decoder_dense")
-        _decoder_embedding = self._model.get_layer(name="decoder_embedding")
-
-        decoder_outputs, state_h, state_c = _decoder(
-            _decoder_embedding(_decoder_inputs), initial_state=decoder_states_inputs)
-        decoder_states_outputs = [state_h, state_c]
-        _decoder_outputs = _decoder_dense(decoder_outputs)
-        decoder_model = Model(
-            [_decoder_inputs] + decoder_states_inputs,
-            [_decoder_outputs] + decoder_states_outputs)
+        # Get encoder model
+        _encoder_model = self._get_encoder_model()
+        # Get decoder model
+        _decoder_model = self._get_decoder_model()
 
         # Encode the input as state vectors.
-        input_seq = np.array(self._encoder_tokenizer.texts_to_sequences([input_sentence]))
-        states_value = _encoder_model.predict(input_seq)
+        _input_seq = np.array(self._encoder_tokenizer.texts_to_sequences([input_sentence]))
+        _states_value = _encoder_model.predict(_input_seq)
 
         # Build index to word dic
-        reverse_target_char_index = dict((idx, word) for word, idx in self._decoder_tokenizer.word_index.items())
+        _reverse_target_token_index = dict((idx, word) for word, idx in self._decoder_tokenizer.word_index.items())
         # Generate empty target sequence of length 1.
         target_seq = [self._decoder_tokenizer.word_index['<bos>']]
 
-        # Sampling loop for a batch of sequences
-        # (to simplify, here we assume a batch of size 1).
         stop_condition = False
         decoded_sentence = ''
         while not stop_condition:
-            output_tokens, h, c = decoder_model.predict(
-                [np.array(target_seq)] + states_value)
+            # Predict next token by previous word and previous states
+            output_tokens, h, c = _decoder_model.predict([np.array(target_seq)] + _states_value)
 
             # Sample a token
             sampled_token_index = np.argmax(output_tokens[0, -1, :])
-            sampled_char = reverse_target_char_index[sampled_token_index]
-            decoded_sentence += sampled_char + " "
+            sampled_token = _reverse_target_token_index[sampled_token_index]
+            decoded_sentence += sampled_token + " "
 
             # Exit condition: either hit max length
             # or find stop character.
-            if (sampled_char == '<eos>' or
+            if (sampled_token == '<eos>' or
                     len(decoded_sentence) > 100):
                 stop_condition = True
 
-            target_seq = [self._decoder_tokenizer.word_index[sampled_char]]
+            target_seq = [self._decoder_tokenizer.word_index[sampled_token]]
 
             # Update states
-            states_value = [h, c]
+            _states_value = [h, c]
 
         return decoded_sentence
 
@@ -78,15 +71,11 @@ class Seq2Seq:
         self._training()
 
     def _build_tokenizer(self, filename):
-        print("Build tokenizer")
         self._encoder_data, self._decoder_data = dataloader.load_data(filename)
-        print("Load done")
         self._decoder_target_data = [x + " <EOS>" for x in self._decoder_data]
         self._decoder_data = ["<BOS> " + x for x in self._decoder_data]
-        print("Data processing done")
         self._build_encoder_tokenizer()
         self._build_decoder_tokenizer()
-        print("Build tokenizer done")
 
     def _build_encoder_tokenizer(self):
         self._encoder_tokenizer = Tokenizer(filters='')
@@ -97,11 +86,9 @@ class Seq2Seq:
         self._decoder_tokenizer.fit_on_texts(self._decoder_data + self._decoder_target_data)
 
     def _build_network(self):
-        print("Build network")
         self._build_encoder()
         self._build_decoder()
         self._model = Model(inputs=[self._encoder_inputs, self._decoder_inputs], outputs=self._decoder_outputs)
-        print("Build network done")
 
     def _build_encoder(self):
         num_encoder_tokens = len(self._encoder_tokenizer.word_index) + 1
@@ -147,12 +134,38 @@ class Seq2Seq:
         print("To categorical done")
 
         self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-
-        self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
-                        batch_size=32,
-                        epochs=50,
-                        validation_split=0.2)
-
+        print("Fit")
+        _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data)
+        self._model.fit_generator(generator=_generator, steps_per_epoch=128, epochs= 50, shuffle=True)
+        # self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
+        #                 batch_size=32,
+        #                 epochs=50,
+        #                 validation_split=0.2)
 
     def get_model(self):
         return self._model
+
+    def _get_encoder_model(self):
+        _encoder_inputs = self._model.get_layer(name="encoder_inputs").input
+        _, encoder_state_h, encoder_state_c = self._model.get_layer(name="encoder").output
+        encoder_states = [encoder_state_h, encoder_state_c]
+        return Model(_encoder_inputs, encoder_states)
+
+    def _get_decoder_model(self):
+        # decoder state for each step
+        _decoder_state_input_h = Input(shape=(128,), name="decoder_state_input_h")
+        _decoder_state_input_c = Input(shape=(128,), name="decoder_state_input_c")
+        decoder_states_inputs = [_decoder_state_input_h, _decoder_state_input_c]
+
+        _decoder = self._model.get_layer(name="decoder")
+        _decoder_inputs = self._model.get_layer(name="decoder_inputs").input
+        _decoder_dense = self._model.get_layer(name="decoder_dense")
+        _decoder_embedding = self._model.get_layer(name="decoder_embedding")
+
+        decoder_outputs, state_h, state_c = _decoder(
+            _decoder_embedding(_decoder_inputs), initial_state=decoder_states_inputs)
+        decoder_states_outputs = [state_h, state_c]
+        _decoder_outputs = _decoder_dense(decoder_outputs)
+        return Model(
+            [_decoder_inputs] + decoder_states_inputs,
+            [_decoder_outputs] + decoder_states_outputs)
