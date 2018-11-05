@@ -1,9 +1,10 @@
+import random
+
+import numpy as np
 from keras import Input, Model
 from keras.layers import LSTM, Dense, Embedding
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import Tokenizer
-
-import numpy as np
 from keras.utils import to_categorical
 
 import dataloader
@@ -14,17 +15,32 @@ class Seq2Seq:
         pass
 
     def _get_generator(self, encoder_input_data, decoder_input_data, decoder_output_data, batch_size=32):
-        data_triplet = zip(encoder_input_data, decoder_input_data, decoder_output_data)
+        data_triplet = [encoder_input_data, decoder_input_data, decoder_output_data]
+        begin_index = 0
         while True:
-            for encoder_input, decoder_input, decoder_output in data_triplet:
-                encoder_input_list = []
-                decoder_input_list = []
-                decoder_output_list = []
-                for i in range(batch_size):
-                    encoder_input_list.append(encoder_input)
-                    decoder_input_list.append(decoder_input)
-                    decoder_output_list.append(decoder_output)
-                yield [np.array(encoder_input_list), np.array(decoder_input_list)], np.array(decoder_output_list)
+            batch_triple = data_triplet[begin_index:begin_index + batch_size]
+
+            batch_encoder_input_data = np.array(batch_triple[0])
+            batch_decoder_input_data = np.array(batch_triple[1])
+            batch_decoder_output_data = np.array(batch_triple[2])
+
+            yield [batch_encoder_input_data, batch_decoder_input_data], batch_decoder_output_data
+            begin_index += batch_size
+            if begin_index + batch_size > len(data_triplet):
+                random.shuffle(batch_triple)
+                begin_index = 0
+
+        # begin_index = 0
+        # while True:
+        #     batch_encoder_input_data = encoder_input_data[begin_index:begin_index + batch_size]
+        #     batch_decoder_input_data = decoder_input_data[begin_index:begin_index + batch_size]
+        #     batch_decoder_output_data = decoder_output_data[begin_index:begin_index + batch_size]
+        #     print(np.shape(batch_decoder_output_data))
+        #
+        #     yield [batch_encoder_input_data, batch_decoder_input_data], batch_decoder_output_data
+        #     begin_index += batch_size
+        #     if begin_index + batch_size > len(encoder_input_data):
+        #         begin_index = 0
 
     def predict(self, input_sentence):
         # Get encoder model
@@ -135,8 +151,8 @@ class Seq2Seq:
 
         self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
         print("Fit")
-        _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data)
-        self._model.fit_generator(generator=_generator, steps_per_epoch=128, epochs= 50, shuffle=True)
+        _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data, 12)
+        self._model.fit_generator(generator=_generator, steps_per_epoch=10, epochs=50, shuffle=True)
         # self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
         #                 batch_size=32,
         #                 epochs=50,
