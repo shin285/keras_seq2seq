@@ -12,8 +12,8 @@ def load_data(filename, separator='\t'):
                 src, dest = line.strip().split(separator)
                 _src_list.append(src)
                 _target_list.append(dest)
-                if len(_target_list) > 100000:
-                    break
+                # if len(_target_list) > 5000:
+                #     break
             except ValueError:
                 print("File format exception : ", line, file=sys.stderr)
     return _src_list, _target_list

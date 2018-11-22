@@ -15,6 +15,7 @@ class Seq2Seq:
         pass
 
     def _get_generator(self, encoder_input_data, decoder_input_data, decoder_output_data, batch_size=32):
+
         data_triplet = [encoder_input_data, decoder_input_data, decoder_output_data]
         begin_index = 0
         while True:
@@ -29,18 +30,6 @@ class Seq2Seq:
             if begin_index + batch_size > len(data_triplet):
                 random.shuffle(batch_triple)
                 begin_index = 0
-
-        # begin_index = 0
-        # while True:
-        #     batch_encoder_input_data = encoder_input_data[begin_index:begin_index + batch_size]
-        #     batch_decoder_input_data = decoder_input_data[begin_index:begin_index + batch_size]
-        #     batch_decoder_output_data = decoder_output_data[begin_index:begin_index + batch_size]
-        #     print(np.shape(batch_decoder_output_data))
-        #
-        #     yield [batch_encoder_input_data, batch_decoder_input_data], batch_decoder_output_data
-        #     begin_index += batch_size
-        #     if begin_index + batch_size > len(encoder_input_data):
-        #         begin_index = 0
 
     def predict(self, input_sentence):
         # Get encoder model
@@ -135,24 +124,37 @@ class Seq2Seq:
         self._decoder_outputs = self._decoder_dense(self._decoder_outputs)
 
     def _training(self):
-        print("Training")
-        encoder_input_data = self._encoder_tokenizer.texts_to_sequences(self._encoder_data)
-        decoder_input_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_data)
-        decoder_output_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_target_data)
-        print("Text to sequence done")
-
-        encoder_input_data = pad_sequences(encoder_input_data, padding="post")
-        decoder_input_data = pad_sequences(decoder_input_data, padding="post")
-        decoder_output_data = pad_sequences(decoder_output_data, padding="post")
-        print("Padding sequence done")
-
-        decoder_output_data = to_categorical(decoder_output_data)
-        print("To categorical done")
+        # print("Training")
+        # encoder_input_data = self._encoder_tokenizer.texts_to_sequences(self._encoder_data)
+        # decoder_input_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_data)
+        # decoder_output_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_target_data)
+        # print("Text to sequence done")
+        #
+        # encoder_input_data = pad_sequences(encoder_input_data, padding="post")
+        # decoder_input_data = pad_sequences(decoder_input_data, padding="post")
+        # decoder_output_data = pad_sequences(decoder_output_data, padding="post")
+        # print("Padding sequence done")
+        #
+        # decoder_output_data = to_categorical(decoder_output_data)
+        # print("To categorical done")
+        #
+        # self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
+        # print("Fit")
+        # _batch_size = 256
+        # _steps_per_epoch = len(encoder_input_data) // _batch_size
+        # print("Batch size", _batch_size)
+        # print("_steps_per_epoch", _steps_per_epoch)
+        # _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data, _batch_size)
 
         self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-        print("Fit")
-        _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data, 12)
-        self._model.fit_generator(generator=_generator, steps_per_epoch=10, epochs=50, shuffle=True)
+
+        _batch_size = 16
+        _steps_per_epoch = len(self._encoder_data) // _batch_size
+        print("Batch size", _batch_size)
+        print("_steps_per_epoch", _steps_per_epoch)
+        _generator = self._get_generator_with_raw_format(_batch_size)
+
+        self._model.fit_generator(generator=_generator, steps_per_epoch=_steps_per_epoch, epochs=50, shuffle=True)
         # self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
         #                 batch_size=32,
         #                 epochs=50,
@@ -185,3 +187,27 @@ class Seq2Seq:
         return Model(
             [_decoder_inputs] + decoder_states_inputs,
             [_decoder_outputs] + decoder_states_outputs)
+
+    def _get_generator_with_raw_format(self, batch_size=32):
+
+        begin_index = 0
+        while True:
+
+            encoder_input_data = self._encoder_tokenizer.texts_to_sequences(
+                self._encoder_data[begin_index:begin_index + batch_size])
+            decoder_input_data = self._decoder_tokenizer.texts_to_sequences(
+                self._decoder_data[begin_index:begin_index + batch_size])
+            decoder_output_data = self._decoder_tokenizer.texts_to_sequences(
+                self._decoder_target_data[begin_index:begin_index + batch_size])
+
+            encoder_input_data = pad_sequences(encoder_input_data, padding="post")
+            decoder_input_data = pad_sequences(decoder_input_data, padding="post")
+            decoder_output_data = pad_sequences(decoder_output_data, padding="post")
+
+            decoder_output_data = to_categorical(decoder_output_data, len(self._decoder_tokenizer.word_index) + 1)
+
+            yield [encoder_input_data, decoder_input_data], decoder_output_data
+            begin_index += batch_size
+            if begin_index + batch_size > len(self._encoder_data):
+                begin_index = 0
+                continue
