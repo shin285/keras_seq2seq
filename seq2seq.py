@@ -1,11 +1,12 @@
 import random
 
 import numpy as np
-from keras import Input, Model
-from keras.layers import LSTM, Dense, Embedding
+from keras import Input, Model, models
+from keras.layers import LSTM, Dense, Embedding, CuDNNLSTM
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import Tokenizer
 from keras.utils import to_categorical
+import pickle
 
 import dataloader
 
@@ -71,14 +72,21 @@ class Seq2Seq:
         return decoded_sentence
 
     def training(self, filename):
-        self._build_tokenizer(filename)
+        self._load_data(filename)
+        self._build_tokenizer()
         self._build_network()
         self._training()
 
-    def _build_tokenizer(self, filename):
+    def _load_data(self, filename):
         self._encoder_data, self._decoder_data = dataloader.load_data(filename)
         self._decoder_target_data = [x + " <EOS>" for x in self._decoder_data]
         self._decoder_data = ["<BOS> " + x for x in self._decoder_data]
+
+        data_triplet = [self._encoder_data, self._decoder_data, self._decoder_target_data]
+
+
+
+    def _build_tokenizer(self):
         self._build_encoder_tokenizer()
         self._build_decoder_tokenizer()
 
@@ -102,7 +110,7 @@ class Seq2Seq:
         # layer init
         self._encoder_inputs = Input(shape=(None,), name="encoder_inputs")
         self._encoder_embedding = Embedding(num_encoder_tokens, embedding_dimension, name="encoder_embedding")
-        self._encoder = LSTM(latent_dimension, return_state=True, name="encoder")
+        self._encoder = CuDNNLSTM(latent_dimension, return_state=True, name="encoder")
 
         encoder_outputs, encoder_state_h, encoder_state_c = self._encoder(self._encoder_embedding(self._encoder_inputs))
         self._encoder_states = [encoder_state_h, encoder_state_c]
@@ -115,7 +123,7 @@ class Seq2Seq:
         # layer init
         self._decoder_inputs = Input(shape=(None,), name="decoder_inputs")
         self._decoder_embedding = Embedding(num_decoder_tokens, embedding_dimension, name="decoder_embedding")
-        self._decoder = LSTM(latent_dimension, return_state=True, return_sequences=True, name="decoder")
+        self._decoder = CuDNNLSTM(latent_dimension, return_state=True, return_sequences=True, name="decoder")
 
         self._decoder_outputs, decoder_state_h, decoder_state_c = self._decoder(
             self._decoder_embedding(self._decoder_inputs), initial_state=self._encoder_states)
@@ -124,37 +132,15 @@ class Seq2Seq:
         self._decoder_outputs = self._decoder_dense(self._decoder_outputs)
 
     def _training(self):
-        # print("Training")
-        # encoder_input_data = self._encoder_tokenizer.texts_to_sequences(self._encoder_data)
-        # decoder_input_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_data)
-        # decoder_output_data = self._decoder_tokenizer.texts_to_sequences(self._decoder_target_data)
-        # print("Text to sequence done")
-        #
-        # encoder_input_data = pad_sequences(encoder_input_data, padding="post")
-        # decoder_input_data = pad_sequences(decoder_input_data, padding="post")
-        # decoder_output_data = pad_sequences(decoder_output_data, padding="post")
-        # print("Padding sequence done")
-        #
-        # decoder_output_data = to_categorical(decoder_output_data)
-        # print("To categorical done")
-        #
-        # self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-        # print("Fit")
-        # _batch_size = 256
-        # _steps_per_epoch = len(encoder_input_data) // _batch_size
-        # print("Batch size", _batch_size)
-        # print("_steps_per_epoch", _steps_per_epoch)
-        # _generator = self._get_generator(encoder_input_data, decoder_input_data, decoder_output_data, _batch_size)
 
         self._model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
 
-        _batch_size = 16
+        _batch_size = 128
         _steps_per_epoch = len(self._encoder_data) // _batch_size
-        print("Batch size", _batch_size)
-        print("_steps_per_epoch", _steps_per_epoch)
         _generator = self._get_generator_with_raw_format(_batch_size)
 
-        self._model.fit_generator(generator=_generator, steps_per_epoch=_steps_per_epoch, epochs=50, shuffle=True)
+        self._model.fit_generator(generator=_generator, steps_per_epoch=_steps_per_epoch, epochs=30, shuffle=True,
+                                  use_multiprocessing=True, workers=4)
         # self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
         #                 batch_size=32,
         #                 epochs=50,
@@ -211,3 +197,21 @@ class Seq2Seq:
             if begin_index + batch_size > len(self._encoder_data):
                 begin_index = 0
                 continue
+
+    def save(self, model_name):
+        # saving
+        with open('encoder_tokenizer.pickle', 'wb') as handle:
+            pickle.dump(self._encoder_tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            # saving
+        with open('decoder_tokenizer.pickle', 'wb') as handle:
+            pickle.dump(self._decoder_tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        self._model.save(model_name)
+
+    def load(self, model_name):
+        # loading
+        with open('encoder_tokenizer.pickle', 'rb') as handle:
+            self._encoder_tokenizer = pickle.load(handle)
+        with open('decoder_tokenizer.pickle', 'rb') as handle:
+            self._decoder_tokenizer = pickle.load(handle)
+        self._model = models.load_model(model_name)
