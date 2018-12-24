@@ -1,19 +1,24 @@
+import pickle
 import random
 
 import numpy as np
 from keras import Input, Model, models
-from keras.layers import LSTM, Dense, Embedding, CuDNNLSTM
+from keras.layers import Dense, Embedding, CuDNNLSTM
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import Tokenizer
 from keras.utils import to_categorical
-import pickle
 
 import dataloader
 
 
 class Seq2Seq:
     def __init__(self):
-        pass
+        self._latent_dim = 256
+        self._embedding_dim = 256
+        self._epoch = 50
+        self._encoder_tokenizer = None
+        self._decoder_tokenizer = None
+        self._model = None
 
     def _get_generator(self, encoder_input_data, decoder_input_data, decoder_output_data, batch_size=32):
 
@@ -71,7 +76,12 @@ class Seq2Seq:
 
         return decoded_sentence
 
-    def training(self, filename):
+    def training(self, filename, latent_dim=256, embedding_dim=256, epoch=50):
+
+        self._latent_dim = latent_dim
+        self._embedding_dim = embedding_dim
+        self._epoch = epoch
+
         self._load_data(filename)
         self._build_tokenizer()
         self._build_network()
@@ -82,20 +92,21 @@ class Seq2Seq:
         self._decoder_target_data = [x + " <EOS>" for x in self._decoder_data]
         self._decoder_data = ["<BOS> " + x for x in self._decoder_data]
 
-        data_triplet = [self._encoder_data, self._decoder_data, self._decoder_target_data]
+        z = list(zip(self._encoder_data, self._decoder_data, self._decoder_target_data))
+        random.shuffle(z)
 
-
+        self._encoder_data[:], self._decoder_data[:], self._decoder_target_data[:] = zip(*z)
 
     def _build_tokenizer(self):
         self._build_encoder_tokenizer()
         self._build_decoder_tokenizer()
 
     def _build_encoder_tokenizer(self):
-        self._encoder_tokenizer = Tokenizer(filters='')
+        self._encoder_tokenizer = Tokenizer(filters='', oov_token='oov', char_level=True)
         self._encoder_tokenizer.fit_on_texts(self._encoder_data)
 
     def _build_decoder_tokenizer(self):
-        self._decoder_tokenizer = Tokenizer(filters='')
+        self._decoder_tokenizer = Tokenizer(filters='', oov_token='oov')
         self._decoder_tokenizer.fit_on_texts(self._decoder_data + self._decoder_target_data)
 
     def _build_network(self):
@@ -105,8 +116,8 @@ class Seq2Seq:
 
     def _build_encoder(self):
         num_encoder_tokens = len(self._encoder_tokenizer.word_index) + 1
-        latent_dimension = 128
-        embedding_dimension = 256
+        latent_dimension = self._latent_dim
+        embedding_dimension = self._embedding_dim
         # layer init
         self._encoder_inputs = Input(shape=(None,), name="encoder_inputs")
         self._encoder_embedding = Embedding(num_encoder_tokens, embedding_dimension, name="encoder_embedding")
@@ -117,8 +128,8 @@ class Seq2Seq:
 
     def _build_decoder(self):
         num_decoder_tokens = len(self._decoder_tokenizer.word_index) + 1
-        latent_dimension = 128
-        embedding_dimension = 256
+        latent_dimension = self._latent_dim
+        embedding_dimension = self._embedding_dim
 
         # layer init
         self._decoder_inputs = Input(shape=(None,), name="decoder_inputs")
@@ -139,12 +150,8 @@ class Seq2Seq:
         _steps_per_epoch = len(self._encoder_data) // _batch_size
         _generator = self._get_generator_with_raw_format(_batch_size)
 
-        self._model.fit_generator(generator=_generator, steps_per_epoch=_steps_per_epoch, epochs=30, shuffle=True,
-                                  use_multiprocessing=True, workers=4)
-        # self._model.fit([np.array(encoder_input_data), np.array(decoder_input_data)], np.array(decoder_output_data),
-        #                 batch_size=32,
-        #                 epochs=50,
-        #                 validation_split=0.2)
+        self._model.fit_generator(generator=_generator, steps_per_epoch=_steps_per_epoch, epochs=self._epoch,
+                                  shuffle=True, workers=4)
 
     def get_model(self):
         return self._model
@@ -157,8 +164,8 @@ class Seq2Seq:
 
     def _get_decoder_model(self):
         # decoder state for each step
-        _decoder_state_input_h = Input(shape=(128,), name="decoder_state_input_h")
-        _decoder_state_input_c = Input(shape=(128,), name="decoder_state_input_c")
+        _decoder_state_input_h = Input(shape=(None,), name="decoder_state_input_h")
+        _decoder_state_input_c = Input(shape=(None,), name="decoder_state_input_c")
         decoder_states_inputs = [_decoder_state_input_h, _decoder_state_input_c]
 
         _decoder = self._model.get_layer(name="decoder")
